@@ -13,18 +13,33 @@ pipeline {
 
         stage('Validate') {
             steps {
-                echo 'Validating HTML files...'
+                echo 'Validating HTML...'
 
                 sh '''
                     test -f hello.html
-                    echo "hello.html found successfully"
+                    echo "HTML validation successful"
+                '''
+            }
+        }
+
+        stage('Backup') {
+            steps {
+                echo 'Backing up current website...'
+
+                sh '''
+                    if [ -f /var/www/html/index.html ]; then
+                        sudo cp /var/www/html/index.html /var/www/html/index.html.backup
+                        echo "Backup created"
+                    else
+                        echo "No existing website to backup"
+                    fi
                 '''
             }
         }
 
         stage('Deploy') {
             steps {
-                echo 'Deploying website to Nginx...'
+                echo 'Deploying new version...'
 
                 sh '''
                     sudo cp hello.html /var/www/html/index.html
@@ -33,25 +48,37 @@ pipeline {
             }
         }
 
-        stage('Verify') {
+        stage('Health Check') {
             steps {
-                echo 'Verifying deployment...'
+                echo 'Checking website health...'
 
                 sh '''
-                    curl -f http://localhost/ > /dev/null
-                    echo "Website is responding successfully"
+                    curl -f http://localhost > /dev/null
+                    echo "Website health check PASSED"
                 '''
             }
         }
     }
 
     post {
+
         success {
-            echo '🎉 Deployment successful!'
+            echo '================================='
+            echo 'DEPLOYMENT SUCCESSFUL'
+            echo '================================='
         }
 
         failure {
-            echo '❌ Deployment failed!'
+            echo '================================='
+            echo 'DEPLOYMENT FAILED - ROLLBACK'
+            echo '================================='
+
+            sh '''
+                if [ -f /var/www/html/index.html.backup ]; then
+                    sudo cp /var/www/html/index.html.backup /var/www/html/index.html
+                    echo "Previous version restored"
+                fi
+            '''
         }
     }
 }
