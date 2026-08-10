@@ -1,12 +1,18 @@
 pipeline {
+
     agent any
+
+    environment {
+        IMAGE_NAME = "frozen-yogurt-website"
+        CONTAINER_NAME = "frozen-yogurt"
+        HOST_PORT = "8081"
+    }
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Checking out website...'
-                checkout scm
+                echo 'Checking out website from GitHub...'
             }
         }
 
@@ -25,45 +31,77 @@ pipeline {
             }
         }
 
-        stage('Backup') {
+        stage('Build Docker Image') {
             steps {
-                echo 'Backing up current website...'
+                echo 'Building Docker image...'
 
                 sh '''
-                    if [ -d /var/www/html ]; then
-                        sudo cp -a /var/www/html /var/www/html.backup
-                        echo "Website backup created"
+                    docker build \
+                    -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                    -t ${IMAGE_NAME}:latest .
+                '''
+            }
+        }
+
+        stage('Backup Current Container') {
+            steps {
+                echo 'Backing up current container...'
+
+                sh '''
+                    if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
+
+                        docker rm -f ${CONTAINER_NAME}-backup 2>/dev/null || true
+
+                        docker rename \
+                        ${CONTAINER_NAME} \
+                        ${CONTAINER_NAME}-backup
+
+                        echo "Previous container backed up"
+
+                    else
+
+                        echo "No previous container found"
+
                     fi
                 '''
             }
         }
 
-        stage('Deploy Website') {
+        stage('Deploy') {
             steps {
-                echo 'Deploying complete website...'
+                echo 'Deploying new website container...'
 
                 sh '''
-                    sudo rm -rf /var/www/html/*
-                    sudo cp -a . /var/www/html/
+                    docker run -d \
+                    --name ${CONTAINER_NAME} \
+                    -p ${HOST_PORT}:80 \
+                    ${IMAGE_NAME}:${BUILD_NUMBER}
 
-                    sudo rm -rf /var/www/html/.git
-
-                    sudo chown -R www-data:www-data /var/www/html
-                    sudo find /var/www/html -type d -exec chmod 755 {} \\;
-                    sudo find /var/www/html -type f -exec chmod 644 {} \\;
-
-                    echo "Complete website deployed successfully"
+                    echo "New website container started"
                 '''
             }
         }
 
         stage('Health Check') {
             steps {
-                echo 'Checking website...'
+                echo 'Checking website health...'
 
                 sh '''
-                    curl -f http://localhost > /dev/null
+                    sleep 5
+
+                    curl -f http://localhost:${HOST_PORT} > /dev/null
+
                     echo "Website health check PASSED"
+                '''
+            }
+        }
+
+        stage('Cleanup Backup') {
+            steps {
+                echo 'Removing old container backup...'
+
+                sh '''
+                    docker rm -f ${CONTAINER_NAME}-backup 2>/dev/null || true
                 '''
             }
         }
@@ -73,20 +111,36 @@ pipeline {
 
         success {
             echo '========================================'
-            echo ' COMPLETE WEBSITE DEPLOYMENT SUCCESSFUL'
+            echo 'DEPLOYMENT SUCCESSFUL'
             echo '========================================'
+
+            sh '''
+                docker ps
+            '''
         }
 
         failure {
             echo '========================================'
-            echo ' DEPLOYMENT FAILED - RESTORING BACKUP'
+            echo 'DEPLOYMENT FAILED - ROLLBACK'
             echo '========================================'
 
             sh '''
-                if [ -d /var/www/html.backup ]; then
-                    sudo rm -rf /var/www/html
-                    sudo cp -a /var/www/html.backup /var/www/html
+                docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
+
+                if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}-backup$"; then
+
+                    docker rename \
+                    ${CONTAINER_NAME}-backup \
+                    ${CONTAINER_NAME}
+
+                    docker start ${CONTAINER_NAME}
+
                     echo "Previous website restored"
+
+                else
+
+                    echo "No backup container available"
+
                 fi
             '''
         }
