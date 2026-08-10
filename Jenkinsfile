@@ -3,9 +3,10 @@ pipeline {
     agent any
 
     environment {
-        IMAGE_NAME = "frozen-yogurt-website"
+        IMAGE_NAME     = "frozen-yogurt-website"
         CONTAINER_NAME = "frozen-yogurt"
-        HOST_PORT = "8081"
+        BACKUP_NAME    = "frozen-yogurt-backup"
+        HOST_PORT      = "8081"
     }
 
     stages {
@@ -37,8 +38,8 @@ pipeline {
 
                 sh '''
                     docker build \
-                    -t ${IMAGE_NAME}:${BUILD_NUMBER} \
-                    -t ${IMAGE_NAME}:latest .
+                        -t ${IMAGE_NAME}:${BUILD_NUMBER} \
+                        -t ${IMAGE_NAME}:latest .
                 '''
             }
         }
@@ -48,15 +49,21 @@ pipeline {
                 echo 'Backing up current container...'
 
                 sh '''
+                    # Remove old backup if it exists
+                    docker rm -f ${BACKUP_NAME} 2>/dev/null || true
+
+                    # If current container exists
                     if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
 
-                        docker rm -f ${CONTAINER_NAME}-backup 2>/dev/null || true
+                        # Stop old container first
+                        docker stop ${CONTAINER_NAME} 2>/dev/null || true
 
+                        # Rename it as backup
                         docker rename \
-                        ${CONTAINER_NAME} \
-                        ${CONTAINER_NAME}-backup
+                            ${CONTAINER_NAME} \
+                            ${BACKUP_NAME}
 
-                        echo "Previous container backed up"
+                        echo "Previous container stopped and backed up"
 
                     else
 
@@ -73,9 +80,9 @@ pipeline {
 
                 sh '''
                     docker run -d \
-                    --name ${CONTAINER_NAME} \
-                    -p ${HOST_PORT}:80 \
-                    ${IMAGE_NAME}:${BUILD_NUMBER}
+                        --name ${CONTAINER_NAME} \
+                        -p ${HOST_PORT}:80 \
+                        ${IMAGE_NAME}:${BUILD_NUMBER}
 
                     echo "New website container started"
                 '''
@@ -87,6 +94,7 @@ pipeline {
                 echo 'Checking website health...'
 
                 sh '''
+                    echo "Waiting for website..."
                     sleep 5
 
                     curl -f http://localhost:${HOST_PORT} > /dev/null
@@ -101,7 +109,17 @@ pipeline {
                 echo 'Removing old container backup...'
 
                 sh '''
-                    docker rm -f ${CONTAINER_NAME}-backup 2>/dev/null || true
+                    if docker ps -a --format '{{.Names}}' | grep -q "^${BACKUP_NAME}$"; then
+
+                        docker rm -f ${BACKUP_NAME}
+
+                        echo "Old container backup removed"
+
+                    else
+
+                        echo "No backup container to remove"
+
+                    fi
                 '''
             }
         }
@@ -111,35 +129,41 @@ pipeline {
 
         success {
             echo '========================================'
-            echo 'DEPLOYMENT SUCCESSFUL'
+            echo '       DEPLOYMENT SUCCESSFUL'
             echo '========================================'
 
             sh '''
-                docker ps
+                echo "Running container:"
+                docker ps --format "table {{.Names}}\\t{{.Image}}\\t{{.Ports}}\\t{{.Status}}"
             '''
         }
 
         failure {
             echo '========================================'
-            echo 'DEPLOYMENT FAILED - ROLLBACK'
+            echo '       DEPLOYMENT FAILED'
+            echo '       STARTING ROLLBACK'
             echo '========================================'
 
             sh '''
+                # Remove failed new container
                 docker rm -f ${CONTAINER_NAME} 2>/dev/null || true
 
-                if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}-backup$"; then
+                # Restore previous container
+                if docker ps -a --format '{{.Names}}' | grep -q "^${BACKUP_NAME}$"; then
+
+                    echo "Restoring previous website..."
 
                     docker rename \
-                    ${CONTAINER_NAME}-backup \
-                    ${CONTAINER_NAME}
+                        ${BACKUP_NAME} \
+                        ${CONTAINER_NAME}
 
                     docker start ${CONTAINER_NAME}
 
-                    echo "Previous website restored"
+                    echo "Previous website restored successfully"
 
                 else
 
-                    echo "No backup container available"
+                    echo "No backup container available for rollback"
 
                 fi
             '''
