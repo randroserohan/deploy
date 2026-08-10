@@ -44,6 +44,19 @@ pipeline {
             }
         }
 
+        stage('Security Scan') {
+            steps {
+                echo 'Scanning Docker image with Trivy...'
+
+                sh '''
+                    trivy image \
+                       --severity HIGH,CRITICAL \
+                       --exit-code 1 \
+                       ${IMAGE_NAME}:${BUILD_NUMBER}
+                '''
+            }
+        }
+
         stage('Backup Current Container') {
             steps {
                 echo 'Backing up current container...'
