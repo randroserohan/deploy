@@ -1,49 +1,38 @@
 pipeline {
-
     agent any
 
     stages {
 
         stage('Checkout') {
             steps {
-                echo 'Checking out source code...'
+                echo 'Checking out website source code...'
                 checkout scm
             }
         }
 
         stage('Validate') {
             steps {
-                echo 'Validating HTML...'
+                echo 'Validating website...'
 
                 sh '''
-                    test -f hello.html
-                    echo "HTML validation successful"
-                '''
-            }
-        }
+                    test -f index.html
+                    test -f about.html
+                    test -f blog.html
+                    test -f contact.html
+                    test -f product.html
+                    test -f singlepost.html
 
-        stage('Backup') {
-            steps {
-                echo 'Backing up current website...'
-
-                sh '''
-                    if [ -f /var/www/html/index.html ]; then
-                        sudo cp /var/www/html/index.html /var/www/html/index.html.backup
-                        echo "Backup created"
-                    else
-                        echo "No existing website to backup"
-                    fi
+                    echo "Website validation successful"
                 '''
             }
         }
 
         stage('Deploy') {
             steps {
-                echo 'Deploying new version...'
+                echo 'Deploying complete website...'
 
                 sh '''
-                    sudo cp hello.html /var/www/html/index.html
-                    sudo chmod 644 /var/www/html/index.html
+                    sudo /usr/local/bin/deploy-website
                 '''
             }
         }
@@ -61,24 +50,16 @@ pipeline {
     }
 
     post {
-
         success {
-            echo '================================='
-            echo 'DEPLOYMENT SUCCESSFUL'
-            echo '================================='
+            echo '========================================'
+            echo '   WEBSITE DEPLOYMENT SUCCESSFUL'
+            echo '========================================'
         }
 
         failure {
-            echo '================================='
-            echo 'DEPLOYMENT FAILED - ROLLBACK'
-            echo '================================='
-
-            sh '''
-                if [ -f /var/www/html/index.html.backup ]; then
-                    sudo cp /var/www/html/index.html.backup /var/www/html/index.html
-                    echo "Previous version restored"
-                fi
-            '''
+            echo '========================================'
+            echo '   DEPLOYMENT FAILED'
+            echo '========================================'
         }
     }
 }
